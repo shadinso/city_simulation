@@ -6,4 +6,5 @@ set(CMAKE_C_STANDARD 11)
 add_executable(city_simulation
         graph.c
         dijkstra.c
+        main.c
 )
