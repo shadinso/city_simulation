@@ -1,1 +1,0 @@
-/usr/bin/cc CMakeFiles/city_simulation.dir/main.c.o CMakeFiles/city_simulation.dir/graph.c.o CMakeFiles/city_simulation.dir/dijkstra.c.o CMakeFiles/city_simulation.dir/renderer.c.o -o city_simulation  -lraylib -lm -ldl -lpthread -lX11 
