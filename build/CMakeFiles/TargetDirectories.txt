@@ -1,0 +1,3 @@
+/home/student/city_simulation/build/CMakeFiles/city_simulation.dir
+/home/student/city_simulation/build/CMakeFiles/edit_cache.dir
+/home/student/city_simulation/build/CMakeFiles/rebuild_cache.dir

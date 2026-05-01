@@ -15,6 +15,7 @@ target_link_libraries(city_simulation
         m
         dl
         pthread
+        X11
 )
 
-configure_file(city.txt city.txt COPYONLY)
+configure_file(city.txt city.txt COPYONLY)  
