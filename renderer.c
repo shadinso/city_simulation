@@ -113,3 +113,6 @@ void draw_graph(const Graph *g, const NodeInfo *info) {
         draw_district(info[i], i);
     }
 }
+void draw_vehicle(float x, float y) {
+    DrawCircle((int)x, (int)y, 10, RED);
+}

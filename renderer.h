@@ -3,17 +3,18 @@
 
 #include "graph.h"
 
-#define SCREEN_WIDTH  960
+#define SCREEN_WIDTH 900
 #define SCREEN_HEIGHT 620
-#define NODE_RADIUS   30
+#define NODE_RADIUS 30
 
 typedef struct {
-    float       x;
-    float       y;
+    float x;
+    float y;
     const char *name;
 } NodeInfo;
 
 void build_city_layout(const Graph *g, NodeInfo *info);
 void draw_graph(const Graph *g, const NodeInfo *info);
+void draw_vehicle(float x, float y);
 
 #endif
