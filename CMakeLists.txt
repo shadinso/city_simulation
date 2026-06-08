@@ -4,6 +4,12 @@ project(city_simulation C)
 
 set(CMAKE_C_STANDARD 99)
 
+add_executable(dijkstra
+        dijkstra_main.c
+        graph.c
+        dijkstra.c
+)
+
 add_executable(sim
         main.c
         graph.c
@@ -20,5 +26,3 @@ target_link_libraries(sim
 )
 
 configure_file(city.txt city.txt COPYONLY)
-
-configure_file(city.txt city.txt COPYONLY)  
