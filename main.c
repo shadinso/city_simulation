@@ -3,6 +3,8 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <fcntl.h>
+#include <errno.h>
 
 #include "raylib.h"
 #include "graph.h"
@@ -11,22 +13,30 @@
 
 #define MAX_TRAVELERS 20
 
+#define MSG_NODE 1
+#define MSG_FINISHED 2
+
+typedef struct {
+    int type;
+    pid_t pid;
+    int traveler_index;
+    int current_node;
+    int next_node;
+} IPCMessage;
+
 typedef struct {
     int src;
     int dst;
-    int *path;
-    int path_len;
-    int cost;
     pid_t pid;
-    Color color;
+    int pipe_fd[2];
 
+    Color color;
     int active;
     int finished;
-    int current_segment;
-    int current_step;
-    float timer;
-    int waiting;
-    float wait_timer;
+
+    int current_node;
+    int next_node;
+
     float x;
     float y;
 } Traveler;
@@ -40,7 +50,7 @@ static int get_edge_weight(Graph *g, int from, int to) {
     return 1;
 }
 
-static int read_milestone4_file(const char *filename, Graph **out_graph,
+static int read_milestone5_file(const char *filename, Graph **out_graph,
                                 Traveler travelers[], int *traveler_count) {
     FILE *fp = fopen(filename, "r");
     if (!fp) {
@@ -113,74 +123,106 @@ static int read_milestone4_file(const char *filename, Graph **out_graph,
 
         travelers[i].src = src;
         travelers[i].dst = dst;
-        travelers[i].path = NULL;
-        travelers[i].path_len = 0;
-        travelers[i].cost = -1;
         travelers[i].pid = -1;
+        travelers[i].pipe_fd[0] = -1;
+        travelers[i].pipe_fd[1] = -1;
         travelers[i].active = 1;
         travelers[i].finished = 0;
-        travelers[i].current_segment = 0;
-        travelers[i].current_step = 0;
-        travelers[i].timer = 0;
-        travelers[i].waiting = 0;
-        travelers[i].wait_timer = 0;
+        travelers[i].current_node = src;
+        travelers[i].next_node = -1;
+        travelers[i].x = 0;
+        travelers[i].y = 0;
     }
 
     fclose(fp);
+
     *out_graph = g;
     *traveler_count = count;
     return 0;
 }
 
-static void update_traveler(Graph *g, NodeInfo *info, Traveler *t) {
-    if (!t->active || t->finished || t->path_len <= 0) return;
+static void send_message(int fd, int type, int index, int current_node, int next_node) {
+    IPCMessage msg;
+    msg.type = type;
+    msg.pid = getpid();
+    msg.traveler_index = index;
+    msg.current_node = current_node;
+    msg.next_node = next_node;
 
-    if (t->current_segment >= t->path_len - 1) {
-        t->finished = 1;
-        if (t->pid > 0) kill(t->pid, SIGTERM);
-        return;
+    write(fd, &msg, sizeof(msg));
+}
+
+static void child_process(Graph *g, Traveler t, int index, int write_fd) {
+    int *path = NULL;
+    int path_len = 0;
+
+    int cost = dijkstra(g, t.src, t.dst, &path, &path_len);
+
+    if (cost < 0 || path_len <= 0) {
+        send_message(write_fd, MSG_FINISHED, index, t.src, -1);
+        close(write_fd);
+        free(path);
+        exit(0);
     }
 
-    if (t->waiting) {
-        t->wait_timer += GetFrameTime();
-        if (t->wait_timer >= 1.0f) {
-            t->waiting = 0;
-            t->wait_timer = 0;
+    for (int i = 0; i < path_len; i++) {
+        int current = path[i];
+        int next = -1;
+
+        if (i < path_len - 1) {
+            next = path[i + 1];
         }
-        return;
+
+        send_message(write_fd, MSG_NODE, index, current, next);
+
+        if (i == path_len - 1) {
+            break;
+        }
+
+        int weight = get_edge_weight(g, current, next);
+        if (weight <= 0) weight = 1;
+
+        usleep(weight * 300000);
+
+        if (i > 0 && i < path_len - 1) {
+            sleep(1);
+        }
     }
 
-    int from = t->path[t->current_segment];
-    int to = t->path[t->current_segment + 1];
-    int weight = get_edge_weight(g, from, to);
+    send_message(write_fd, MSG_FINISHED, index, path[path_len - 1], -1);
 
-    if (weight <= 0) weight = 1;
+    close(write_fd);
+    free(path);
+    exit(0);
+}
 
-    t->timer += GetFrameTime();
+static void handle_message(IPCMessage msg, Traveler travelers[], NodeInfo *info) {
+    int i = msg.traveler_index;
 
-    if (t->timer >= 0.3f) {
-        t->timer = 0;
-        t->current_step++;
+    if (msg.type == MSG_NODE) {
+        travelers[i].current_node = msg.current_node;
+        travelers[i].next_node = msg.next_node;
 
-        float ratio = (float)t->current_step / weight;
+        travelers[i].x = info[msg.current_node].x;
+        travelers[i].y = info[msg.current_node].y;
 
-        t->x = info[from].x + (info[to].x - info[from].x) * ratio;
-        t->y = info[from].y + (info[to].y - info[from].y) * ratio;
-
-        if (t->current_step >= weight) {
-            t->current_segment++;
-            t->current_step = 0;
-
-            t->x = info[to].x;
-            t->y = info[to].y;
-
-            if (t->current_segment < t->path_len - 1) {
-                t->waiting = 1;
-            } else {
-                t->finished = 1;
-                if (t->pid > 0) kill(t->pid, SIGTERM);
-            }
+        if (msg.next_node == -1) {
+            printf("[PID=%d] arrived at node %d | DESTINATION\n",
+                   msg.pid, msg.current_node);
+        } else {
+            printf("[PID=%d] arrived at node %d | next node: %d\n",
+                   msg.pid, msg.current_node, msg.next_node);
         }
+
+        fflush(stdout);
+    }
+
+    if (msg.type == MSG_FINISHED) {
+        travelers[i].finished = 1;
+        travelers[i].active = 0;
+
+        printf("[PID=%d] finished\n", msg.pid);
+        fflush(stdout);
     }
 }
 
@@ -194,7 +236,7 @@ int main(int argc, char *argv[]) {
     Traveler travelers[MAX_TRAVELERS];
     int traveler_count = 0;
 
-    if (read_milestone4_file(argv[1], &g, travelers, &traveler_count) != 0) {
+    if (read_milestone5_file(argv[1], &g, travelers, &traveler_count) != 0) {
         return 1;
     }
 
@@ -215,57 +257,46 @@ int main(int argc, char *argv[]) {
 
     for (int i = 0; i < traveler_count; i++) {
         travelers[i].color = colors[i % MAX_TRAVELERS];
+        travelers[i].x = info[travelers[i].src].x;
+        travelers[i].y = info[travelers[i].src].y;
 
-        travelers[i].cost = dijkstra(g,
-                                     travelers[i].src,
-                                     travelers[i].dst,
-                                     &travelers[i].path,
-                                     &travelers[i].path_len);
-
-        if (travelers[i].cost < 0) {
-            printf("No path found for traveler %d\n", i);
+        if (pipe(travelers[i].pipe_fd) == -1) {
+            perror("pipe");
             travelers[i].active = 0;
             continue;
         }
-
-        travelers[i].x = info[travelers[i].path[0]].x;
-        travelers[i].y = info[travelers[i].path[0]].y;
 
         pid_t pid = fork();
 
         if (pid < 0) {
             perror("fork");
             travelers[i].active = 0;
+            close(travelers[i].pipe_fd[0]);
+            close(travelers[i].pipe_fd[1]);
         } else if (pid == 0) {
-            printf("[%d] started\n", getpid());
-            fflush(stdout);
-
-            while (1) {
-                pause();
-            }
-
-            exit(0);
+            close(travelers[i].pipe_fd[0]);
+            child_process(g, travelers[i], i, travelers[i].pipe_fd[1]);
         } else {
             travelers[i].pid = pid;
+            close(travelers[i].pipe_fd[1]);
+
+            int flags = fcntl(travelers[i].pipe_fd[0], F_GETFL, 0);
+            fcntl(travelers[i].pipe_fd[0], F_SETFL, flags | O_NONBLOCK);
         }
     }
 
-    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "City Simulation - Milestone 4");
+    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "City Simulation - Milestone 5 IPC");
     SetTargetFPS(60);
 
-    int playing = 0;
-
     while (!WindowShouldClose()) {
-        Rectangle btn = {20, 20, 140, 40};
+        for (int i = 0; i < traveler_count; i++) {
+            if (travelers[i].pipe_fd[0] != -1) {
+                IPCMessage msg;
+                ssize_t bytes;
 
-        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) &&
-            CheckCollisionPointRec(GetMousePosition(), btn)) {
-            playing = !playing;
-        }
-
-        if (playing) {
-            for (int i = 0; i < traveler_count; i++) {
-                update_traveler(g, info, &travelers[i]);
+                while ((bytes = read(travelers[i].pipe_fd[0], &msg, sizeof(msg))) == sizeof(msg)) {
+                    handle_message(msg, travelers, info);
+                }
             }
         }
 
@@ -275,7 +306,7 @@ int main(int argc, char *argv[]) {
         draw_graph(g, info);
 
         for (int i = 0; i < traveler_count; i++) {
-            if (travelers[i].active) {
+            if (!travelers[i].finished) {
                 DrawCircle((int)travelers[i].x,
                            (int)travelers[i].y,
                            10,
@@ -283,6 +314,7 @@ int main(int argc, char *argv[]) {
 
                 char label[10];
                 sprintf(label, "T%d", i + 1);
+
                 DrawText(label,
                          (int)travelers[i].x + 12,
                          (int)travelers[i].y - 8,
@@ -291,35 +323,30 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        DrawRectangleRec(btn, LIGHTGRAY);
-
-        if (playing) {
-            DrawText("STOP", 50, 30, 20, RED);
-        } else {
-            DrawText("PLAY", 50, 30, 20, GREEN);
-        }
-
         int all_finished = 1;
         for (int i = 0; i < traveler_count; i++) {
-            if (travelers[i].active && !travelers[i].finished) {
+            if (!travelers[i].finished) {
                 all_finished = 0;
             }
         }
 
         if (all_finished) {
-            DrawText("ALL ARRIVED!", 20, 80, 30, GREEN);
+            DrawText("ALL FINISHED!", 20, 30, 30, GREEN);
         }
+
+        DrawText("Milestone 5 - IPC using pipes", 20, SCREEN_HEIGHT - 35, 20, RAYWHITE);
 
         EndDrawing();
     }
 
     for (int i = 0; i < traveler_count; i++) {
-        if (travelers[i].pid > 0) {
-            kill(travelers[i].pid, SIGTERM);
-            waitpid(travelers[i].pid, NULL, 0);
+        if (travelers[i].pipe_fd[0] != -1) {
+            close(travelers[i].pipe_fd[0]);
         }
 
-        free(travelers[i].path);
+        if (travelers[i].pid > 0) {
+            waitpid(travelers[i].pid, NULL, 0);
+        }
     }
 
     free(info);
