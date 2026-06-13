@@ -61,7 +61,7 @@ make milestone5
 ### Milestone 6 — Node synchronization (semaphores)
 
 make milestone6
-./sim city_m5.txt
+./sim city_m6.txt
 
 ### Clean build artifacts
 
