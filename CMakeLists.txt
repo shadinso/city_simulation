@@ -17,7 +17,22 @@ add_executable(sim
         renderer.c
 )
 
+add_executable(sim_m4
+        main_m4.c
+        graph.c
+        dijkstra.c
+        renderer.c
+)
+
 target_link_libraries(sim
+        raylib
+        m
+        dl
+        pthread
+        X11
+)
+
+target_link_libraries(sim_m4
         raylib
         m
         dl

@@ -17,7 +17,7 @@ milestone3: build
 	cp build/dijkstra ./dijkstra
 
 milestone4: build
-	cp build/sim ./sim
+	cp build/sim_m4 ./sim
 	cp build/dijkstra ./dijkstra
 	@echo "Running Milestone 4 version"
 
