@@ -4,7 +4,7 @@
  * At any given moment, only ONE traveler may occupy a node.
  * Others wait outside (blocked on the semaphore).
  * The GUI shows waiting travelers in YELLOW, moving travelers in their color.
- * Smooth interpolation between nodes (no jumping).
+ * Smooth interpolation between nodes (no jumping/teleporting).
  *
  * IPC: pipes (one per traveler, non-blocking reads in GUI loop)
  * Sync: POSIX named semaphores, one per node (/city_node_0, /city_node_1, ...)
@@ -36,9 +36,10 @@
 #define MSG_ENTERED   4
 
 /* How many microseconds per unit of edge weight in child timing.
- * 1200000 = 1.2 seconds per weight unit → edge weight 4 = ~5 sec.
- * Keeps the demo clearly visible and within 30-60 s for milestone 6. */
-#define USEC_PER_WEIGHT 1200000
+ * 1500000 = 1.5 seconds per weight unit -> edge weight 4 = ~6 sec.
+ * Slow enough that the smooth movement along each edge is clearly
+ * visible, while keeping the whole demo within ~30-60 s. */
+#define USEC_PER_WEIGHT 1500000
 
 typedef struct {
     int   type;
@@ -68,9 +69,10 @@ typedef struct {
     float from_y;
     float to_x;
     float to_y;
-    float move_progress;   /* 0.0 → 1.0 */
+    float move_progress;   /* 0.0 -> 1.0 */
     float move_duration;   /* seconds for current edge */
     int   is_moving;
+    int   placed;          /* 0 until the traveler has been drawn once */
 
     int   current_node;
     int   next_node;
@@ -162,6 +164,7 @@ static int read_input_file(const char *filename, Graph **out_graph,
         travelers[i].move_progress = 1.0f;
         travelers[i].move_duration = 1.0f;
         travelers[i].is_moving    = 0;
+        travelers[i].placed       = 0;
     }
 
     fclose(fp);
@@ -279,19 +282,29 @@ static void handle_message(IPCMessage msg, Traveler travelers[],
             travelers[i].to_x   = info[msg.current_node].x;
             travelers[i].to_y   = info[msg.current_node].y;
 
-            /* Duration proportional to edge weight for visual smoothness.
-             * First node (src): snap instantly (progress = 1). */
-            if (prev_node == msg.current_node ||
-                travelers[i].move_progress >= 1.0f) {
-                /* First placement or already at dest: snap */
+            /*
+             * Snap instantly ONLY the very first time the traveler is
+             * placed on the board (it should appear right at its
+             * source node, not slide in from nowhere). Every later
+             * arrival must be animated, so the traveler clearly
+             * slides along the edge instead of teleporting.
+             *
+             * NOTE: previously this also checked
+             * `travelers[i].move_progress >= 1.0f`, but that flag is
+             * (almost) always 1.0 by the time a new MSG_NODE arrives,
+             * which made EVERY hop snap instantly. That was the cause
+             * of travelers appearing to "jump"/teleport between nodes.
+             */
+            if (!travelers[i].placed) {
                 travelers[i].x             = travelers[i].to_x;
                 travelers[i].y             = travelers[i].to_y;
                 travelers[i].move_progress = 1.0f;
                 travelers[i].is_moving     = 0;
+                travelers[i].placed        = 1;
             } else {
                 int w = get_edge_weight(g, prev_node, msg.current_node);
                 if (w <= 0) w = 1;
-                /* duration in seconds = weight × USEC_PER_WEIGHT / 1e6 */
+                /* duration in seconds = weight * USEC_PER_WEIGHT / 1e6 */
                 travelers[i].move_duration = (float)(w * USEC_PER_WEIGHT) / 1000000.0f;
                 travelers[i].move_progress = 0.0f;
                 travelers[i].is_moving     = 1;
@@ -336,7 +349,7 @@ int main(int argc, char *argv[]) {
     NodeInfo *info = malloc(g->num_nodes * sizeof(NodeInfo));
     if (!info) { free_graph(g); return 1; }
 
-    build_city_layout(g, info);
+    build_layout(g, info);
 
     /* --- Create one named semaphore per node (value = 1) --- */
     sem_t *node_sems[MAX_NODES];
@@ -390,7 +403,7 @@ int main(int argc, char *argv[]) {
             /* Child: close read end */
             close(travelers[i].pipe_fd[0]);
             child_process(g, travelers[i], i, travelers[i].pipe_fd[1]);
-            /* child_process calls exit() — never returns */
+            /* child_process calls exit() -- never returns */
 
         } else {
             /* Parent: close write end, set pipe non-blocking */
@@ -458,7 +471,7 @@ int main(int argc, char *argv[]) {
             Color display_color = travelers[i].waiting
                                       ? YELLOW
                                       : travelers[i].color;
-            int radius = travelers[i].waiting ? 8 : 11;
+            int radius = travelers[i].waiting ? 9 : 13;
 
             /* Stack waiting travelers so they don't overlap completely */
             int offset_y = 0;
@@ -470,7 +483,7 @@ int main(int argc, char *argv[]) {
                         rank++;
                     }
                 }
-                offset_y = (rank + 1) * 22;   /* push each waiter down */
+                offset_y = (rank + 1) * 26;   /* push each waiter down */
             }
 
             DrawCircle((int)travelers[i].x,
@@ -478,21 +491,30 @@ int main(int argc, char *argv[]) {
                        radius,
                        display_color);
 
+            DrawCircleLines((int)travelers[i].x,
+                             (int)travelers[i].y + offset_y,
+                             radius,
+                             BLACK);
+
             char label[16];
             sprintf(label, travelers[i].waiting ? "W%d" : "T%d", i + 1);
 
             DrawText(label,
-                     (int)travelers[i].x + 13,
-                     (int)travelers[i].y - 7 + offset_y,
-                     14,
+                     (int)travelers[i].x + 15,
+                     (int)travelers[i].y - 8 + offset_y,
+                     16,
                      WHITE);
         }
 
+        /* Header / title bar */
+        draw_header("City Simulation - Graph Traffic",
+                     "Milestone 6 - Node Synchronization (semaphores) | IPC: pipes");
+
         /* Legend */
-        DrawText("T# = traveling   W# = waiting for node",
+        DrawText("T# = traveling     W# = waiting outside a full node",
                  20, SCREEN_HEIGHT - 60, 16, RAYWHITE);
-        DrawText("Milestone 6 - Node Sync (semaphores)",
-                 20, SCREEN_HEIGHT - 35, 20, RAYWHITE);
+        DrawText("Each traveler stays exactly 1 second inside a node it enters",
+                 20, SCREEN_HEIGHT - 35, 16, RAYWHITE);
 
         /* All-done banner */
         int all_done = 1;
@@ -500,7 +522,7 @@ int main(int argc, char *argv[]) {
             if (!travelers[i].finished) { all_done = 0; break; }
         }
         if (all_done) {
-            DrawText("ALL FINISHED!", 20, 30, 30, GREEN);
+            DrawText("ALL FINISHED!", 20, 75, 30, GREEN);
         }
 
         EndDrawing();
