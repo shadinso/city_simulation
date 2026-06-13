@@ -2,10 +2,10 @@
 
 ## Team Members
 
-- Shadin Sorkhi (shadinso)
-- Alaa Eweisat (alaa-eweisat)
-- Dania Hammar (daniaha2005)
-- Rama Sublaban (ramasu22)
+* Shadin Sorkhi (shadinso)
+* Alaa Eweisat (alaa-eweisat)
+* Dania Hammar (daniaha2005)
+* Rama Sublaban (ramasu22)
 
 ## Project Description
 
@@ -23,7 +23,9 @@ dijkstra.c / dijkstra.h - Shortest path algorithm
 
 renderer.c / renderer.h - GUI rendering
 
-main.c - Simulation logic
+main.c - Simulation logic for Milestones 5 and 6
+
+main_m4.c - Separate Milestone 4 implementation
 
 Makefile - Build targets
 
@@ -51,7 +53,7 @@ make milestone3
 ### Milestone 4 — Multiple travelers (fork, parent manages GUI)
 
 make milestone4
-./sim city_m4.txt
+./sim city_m5.txt
 
 ### Milestone 5 — IPC (children compute own paths and report via pipes)
 
@@ -116,20 +118,20 @@ Once the semaphore becomes available, the traveler enters the node and sends a M
 
 This guarantees:
 
-- Mutual exclusion: no two travelers can occupy the same node simultaneously.
-- Waiting travelers are eventually allowed to enter once the node becomes available.
-- The GUI clearly displays waiting travelers using a yellow circle and a W# label.
+* Mutual exclusion: no two travelers can occupy the same node simultaneously.
+* Waiting travelers are eventually allowed to enter once the node becomes available.
+* The GUI clearly displays waiting travelers using a yellow circle and a W# label.
 
 #### IPC Message Types
 
-- MSG_NODE – traveler arrived at a node.
-- MSG_FINISHED – traveler completed its route.
-- MSG_WAITING – traveler waiting outside a node.
-- MSG_ENTERED – traveler entered a node after acquiring the semaphore.
+* MSG_NODE – traveler arrived at a node.
+* MSG_FINISHED – traveler completed its route.
+* MSG_WAITING – traveler waiting outside a node.
+* MSG_ENTERED – traveler entered a node after acquiring the semaphore.
 
 ---
 
 ## Dependencies
 
-- Raylib (must be installed on the system)
-- Standard C99 + POSIX
+* Raylib (must be installed on the system)
+* Standard C99 + POSIX
