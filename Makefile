@@ -2,42 +2,37 @@
 
 all: milestone6
 
-milestone1:
+build:
 	mkdir -p build
 	cd build && cmake .. && make
+
+milestone1: build
 	cp build/dijkstra ./dijkstra
 
-milestone2:
-	mkdir -p build
-	cd build && cmake .. && make
+milestone2: build
 	cp build/sim ./sim
 
-milestone3:
-	mkdir -p build
-	cd build && cmake .. && make
+milestone3: build
 	cp build/sim ./sim
 	cp build/dijkstra ./dijkstra
 
-milestone4:
-	mkdir -p build
-	cd build && cmake .. && make
+milestone4: build
 	cp build/sim ./sim
 	cp build/dijkstra ./dijkstra
+	@echo "Running Milestone 4 version"
 
-milestone5:
-	mkdir -p build
-	cd build && cmake .. && make
+milestone5: build
 	cp build/sim ./sim
 	cp build/dijkstra ./dijkstra
+	@echo "Running Milestone 5 version"
 
-milestone6:
-	mkdir -p build
-	cd build && cmake .. && make
+milestone6: build
 	cp build/sim ./sim
 	cp build/dijkstra ./dijkstra
+	@echo "Running Milestone 6 version"
 
 run:
-	./sim city_m5.txt
+	./sim city_m6.txt
 
 clean:
 	rm -rf build sim dijkstra
