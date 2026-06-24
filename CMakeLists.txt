@@ -41,3 +41,20 @@ target_link_libraries(sim_m4
 )
 
 configure_file(city.txt city.txt COPYONLY)
+
+add_executable(sim_m7
+        main_m7.c
+        graph.c
+        dijkstra.c
+        renderer.c
+)
+
+target_link_libraries(sim_m7
+        raylib
+        m
+        dl
+        pthread
+        X11
+)
+
+

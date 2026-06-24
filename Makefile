@@ -36,3 +36,8 @@ run:
 
 clean:
 	rm -rf build sim dijkstra
+
+milestone7:
+	cmake -S . -B build
+	cmake --build build --target sim_m7
+	cp build/sim_m7 sim
