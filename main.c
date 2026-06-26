@@ -40,6 +40,7 @@ typedef struct {
     int src, dst;
     pid_t pid;
     int pipe_fd[2];
+    int ack_fd[2];
 
     Color color;
     int finished;
@@ -78,6 +79,12 @@ static void send_message(int fd, int type, int index, int current, int next) {
     msg.current_node = current;
     msg.next_node = next;
     write(fd, &msg, sizeof(msg));
+}
+
+static void wait_ack(int ack_fd)
+{
+    IPCMessage ack;
+    read(ack_fd, &ack, sizeof(ack));
 }
 
 static int read_input_file(const char *filename, Graph **out_graph,
@@ -129,7 +136,7 @@ static int read_input_file(const char *filename, Graph **out_graph,
     return 0;
 }
 
-static void child_process(Graph *g, Traveler t, int index, int write_fd) {
+static void child_process(Graph *g, Traveler t, int index, int write_fd, int ack_fd) {
     int *path = NULL;
     int path_len = 0;
 
@@ -137,6 +144,7 @@ static void child_process(Graph *g, Traveler t, int index, int write_fd) {
 
     if (cost < 0 || path_len <= 0) {
         send_message(write_fd, MSG_FINISHED, index, t.src, -1);
+        wait_ack(ack_fd);
         close(write_fd);
         free(path);
         exit(0);
@@ -147,6 +155,7 @@ static void child_process(Graph *g, Traveler t, int index, int write_fd) {
         int next = (i < path_len - 1) ? path[i + 1] : -1;
 
         send_message(write_fd, MSG_WAITING, index, current, next);
+        wait_ack(ack_fd);
 
         char sem_name[64];
         make_sem_name(sem_name, current);
@@ -160,12 +169,13 @@ static void child_process(Graph *g, Traveler t, int index, int write_fd) {
         }
 
         send_message(write_fd, MSG_NODE, index, current, next);
+       wait_ack(ack_fd);
 
         sleep(NODE_WAIT_SECONDS);
 
         if (next != -1) {
             send_message(write_fd, MSG_TRAVELING, index, current, next);
-
+           wait_ack(ack_fd);
             /*
              * Do not release the node until the traveler visually leaves it.
              */
@@ -185,7 +195,7 @@ static void child_process(Graph *g, Traveler t, int index, int write_fd) {
     }
 
     send_message(write_fd, MSG_FINISHED, index, path[path_len - 1], -1);
-
+    wait_ack(ack_fd);
     close(write_fd);
     free(path);
     exit(0);
@@ -335,25 +345,32 @@ int main(int argc, char *argv[]) {
             perror("pipe");
             continue;
         }
+       if (pipe(travelers[i].ack_fd) == -1) {
+    perror("ack pipe");
+    continue;
+}
 
         pid_t pid = fork();
 
         if (pid < 0) {
-            perror("fork");
-            close(travelers[i].pipe_fd[0]);
-            close(travelers[i].pipe_fd[1]);
-        } else if (pid == 0) {
-            close(travelers[i].pipe_fd[0]);
-            child_process(g, travelers[i], i, travelers[i].pipe_fd[1]);
-        } else {
-            travelers[i].pid = pid;
-            close(travelers[i].pipe_fd[1]);
+    perror("fork");
+    close(travelers[i].pipe_fd[0]);
+    close(travelers[i].pipe_fd[1]);
+    close(travelers[i].ack_fd[0]);
+    close(travelers[i].ack_fd[1]);
+} else if (pid == 0) {
+    close(travelers[i].pipe_fd[0]);
+    close(travelers[i].ack_fd[1]);
+    child_process(g, travelers[i], i, travelers[i].pipe_fd[1], travelers[i].ack_fd[0]);
+} else {
+    travelers[i].pid = pid;
+    close(travelers[i].pipe_fd[1]);
+    close(travelers[i].ack_fd[0]);
 
-            int flags = fcntl(travelers[i].pipe_fd[0], F_GETFL, 0);
-            fcntl(travelers[i].pipe_fd[0], F_SETFL, flags | O_NONBLOCK);
-        }
-    }
-
+    int flags = fcntl(travelers[i].pipe_fd[0], F_GETFL, 0);
+    fcntl(travelers[i].pipe_fd[0], F_SETFL, flags | O_NONBLOCK);
+}
+}
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "City Simulation - Milestone 6 Sync");
     SetTargetFPS(60);
 
@@ -366,6 +383,7 @@ int main(int argc, char *argv[]) {
             IPCMessage msg;
             while (read(travelers[i].pipe_fd[0], &msg, sizeof(msg)) == sizeof(msg)) {
                 handle_message(msg, travelers, info, g);
+               write(travelers[i].ack_fd[1], &msg, sizeof(msg)); 
             }
         }
 
