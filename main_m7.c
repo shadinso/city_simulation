@@ -54,7 +54,7 @@
 /* Scheduling algorithm IDs */
 #define SCHED_FCFS 0
 #define SCHED_SJF  1
-
+#define SCHED_PRIORITY 2
 /* ------------------------------------------------------------------ */
 /* IPC message sent from child -> parent (via data pipe)              */
 /* ------------------------------------------------------------------ */
@@ -74,6 +74,7 @@ typedef struct {
     int traveler_index;
     int remaining;     /* burst for SJF */
     long arrival_seq;  /* monotonic arrival counter for FCFS */
+      pid_t pid;
 } WaitEntry;
 
 typedef struct {
@@ -270,11 +271,12 @@ static void child_process(Graph *g, Traveler t, int index,
 
 /* Add a traveler to a node's wait queue */
 static void queue_add(NodeQueue *q, int traveler_index,
-                      int remaining, long seq) {
+                      int remaining, long seq, pid_t pid) {
     if (q->count >= MAX_TRAVELERS) return;
     q->entries[q->count].traveler_index = traveler_index;
     q->entries[q->count].remaining      = remaining;
     q->entries[q->count].arrival_seq    = seq;
+  q->entries[q->count].pid            = pid;
     q->count++;
 }
 
@@ -294,15 +296,13 @@ static int queue_pick(NodeQueue *q, int sched) {
     if (q->count == 0) return -1;
 
     if (sched == SCHED_FCFS) {
-        /* Earliest arrival sequence number wins */
         int best = 0;
         for (int i = 1; i < q->count; i++) {
             if (q->entries[i].arrival_seq < q->entries[best].arrival_seq)
                 best = i;
         }
         return best;
-    } else {
-        /* SJF: fewest remaining hops wins; tie-break by arrival */
+    } else if (sched == SCHED_SJF) {
         int best = 0;
         for (int i = 1; i < q->count; i++) {
             if (q->entries[i].remaining < q->entries[best].remaining)
@@ -312,9 +312,18 @@ static int queue_pick(NodeQueue *q, int sched) {
                 best = i;
         }
         return best;
+    } else {
+        int best = 0;
+        for (int i = 1; i < q->count; i++) {
+            if (q->entries[i].pid < q->entries[best].pid)
+                best = i;
+            else if (q->entries[i].pid == q->entries[best].pid &&
+                     q->entries[i].arrival_seq < q->entries[best].arrival_seq)
+                best = i;
+        }
+        return best;
     }
 }
-
 /* ================================================================== */
 /* Message handler (parent side)                                       */
 /* ================================================================== */
@@ -347,7 +356,7 @@ static void handle_message(IPCMessage msg, Traveler travelers[],
         fflush(stdout);
 
         /* Add to the node's wait queue */
-        queue_add(&node_queues[node], i, msg.remaining, (*seq_counter)++);
+        queue_add(&node_queues[node], i, msg.remaining, (*seq_counter)++, msg.pid);
 
         /* If node is free, grant entry immediately */
         if (!node_occupied[node]) {
@@ -465,7 +474,7 @@ int main(int argc, char *argv[]) {
 
     if (argc < 4) {
         fprintf(stderr,
-                "Usage: %s -schd fcfs|sjf <graph_file>\n", argv[0]);
+              "Usage: %s -schd fcfs|sjf|priority <graph_file>\n", argv[0]);
         return 1;
     }
 
@@ -475,15 +484,19 @@ int main(int argc, char *argv[]) {
     }
 
     if (strcmp(argv[2], "sjf") == 0) {
-        sched      = SCHED_SJF;
-        sched_name = "SJF";
-    } else if (strcmp(argv[2], "fcfs") == 0) {
-        sched      = SCHED_FCFS;
-        sched_name = "FCFS";
-    } else {
-        fprintf(stderr, "Unknown scheduling algorithm: %s\n", argv[2]);
-        return 1;
-    }
+    sched      = SCHED_SJF;
+    sched_name = "SJF";
+} else if (strcmp(argv[2], "fcfs") == 0) {
+    sched      = SCHED_FCFS;
+    sched_name = "FCFS";
+} else if (strcmp(argv[2], "priority") == 0) {
+    sched      = SCHED_PRIORITY;
+    sched_name = "PRIORITY";
+} else {
+    fprintf(stderr, "Unknown scheduling algorithm: %s\n", argv[2]);
+    fprintf(stderr, "Usage: %s -schd fcfs|sjf|priority <graph_file>\n", argv[0]);
+    return 1;
+}
 
     filename = argv[3];
 
